@@ -7,7 +7,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "${MSS_PORT:-8080}:8080"
+      - "${MSS_PORT:-9000}:9000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s

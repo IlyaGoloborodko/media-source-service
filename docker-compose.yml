@@ -8,8 +8,12 @@ services:
         required: false
     ports:
       - "${MSS_PORT:-9000}:9000"
+    # YouTube cookies: MSS_YTDLP_COOKIEFILE=cookies.txt comes from .env; the file
+    # itself is mounted read-only here. Must use UNIX (LF) line endings.
+    volumes:
+      - ./cookies.txt:/app/cookies.txt:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      test: ["CMD-SHELL", "python -c \"import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('MSS_PORT','9000')+'/health')\""]
       interval: 30s
       timeout: 5s
       retries: 3

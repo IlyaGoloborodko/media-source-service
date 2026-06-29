@@ -1,4 +1,7 @@
 import asyncio
+import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -23,16 +26,26 @@ _STREAM_OPTS: dict[str, Any] = {
     "no_warnings": True,
     "skip_download": True,
     "noplaylist": True,
-    "format": "bestaudio",
+    # Prefer an audio-only stream; fall back to best combined when a video has
+    # no audio-only format (e.g. HLS-only livestreams/premieres). The consumer
+    # extracts audio from the combined stream with ffmpeg.
+    "format": "bestaudio/best",
 }
 
 
 class YouTubeProvider(Provider):
     name = "youtube"
 
-    def __init__(self, search_opts: dict | None = None, stream_opts: dict | None = None):
-        self._search_opts = {**_SEARCH_OPTS, **(search_opts or {})}
-        self._stream_opts = {**_STREAM_OPTS, **(stream_opts or {})}
+    def __init__(
+        self,
+        cookiefile: str | None = None,
+        cookies_from_browser: str | None = None,
+        search_opts: dict | None = None,
+        stream_opts: dict | None = None,
+    ):
+        cookie_opts = _build_cookie_opts(cookiefile, cookies_from_browser)
+        self._search_opts = {**_SEARCH_OPTS, **cookie_opts, **(search_opts or {})}
+        self._stream_opts = {**_STREAM_OPTS, **cookie_opts, **(stream_opts or {})}
 
     async def search(self, query: str, limit: int) -> list[Track]:
         query = query.strip()
@@ -95,6 +108,47 @@ class YouTubeProvider(Provider):
             duration=entry.get("duration"),
             thumbnail=entry.get("thumbnail"),
         )
+
+
+def _build_cookie_opts(
+    cookiefile: str | None, cookies_from_browser: str | None
+) -> dict[str, Any]:
+    """Translate cookie settings into yt-dlp options.
+
+    yt-dlp forbids combining a cookie file with browser extraction, so we
+    reject that up front instead of letting it fail mid-request.
+    """
+    if cookiefile and cookies_from_browser:
+        raise ValueError(
+            "set only one of ytdlp_cookiefile / ytdlp_cookies_from_browser"
+        )
+    if cookiefile:
+        return {"cookiefile": _writable_cookie_copy(cookiefile)}
+    if cookies_from_browser:
+        return {"cookiesfrombrowser": _parse_browser_spec(cookies_from_browser)}
+    return {}
+
+
+def _writable_cookie_copy(cookiefile: str) -> str:
+    """Return a writable copy of ``cookiefile``.
+
+    yt-dlp writes rotated cookies back to the cookie file after each run. When
+    the source is a read-only mount (e.g. Docker ``:ro``) that write fails with
+    "Read-only file system"; even a writable single-file bind mount breaks
+    because yt-dlp saves via an atomic rename onto the mount point. Copying to a
+    private temp file sidesteps both. The original (mounted) file is untouched.
+    """
+    fd, dst = tempfile.mkstemp(prefix="mss_cookies_", suffix=".txt")
+    os.close(fd)
+    shutil.copyfile(cookiefile, dst)
+    return dst
+
+
+def _parse_browser_spec(spec: str) -> tuple[str, str | None, None, None]:
+    """Parse a "browser[:profile]" string into yt-dlp's cookiesfrombrowser
+    4-tuple ``(browser, profile, keyring, container)``."""
+    name, _, profile = spec.partition(":")
+    return (name.strip().lower(), profile.strip() or None, None, None)
 
 
 def _extract_expiry(stream_url: str) -> datetime | None:

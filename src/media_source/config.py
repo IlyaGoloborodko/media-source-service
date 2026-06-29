@@ -25,6 +25,18 @@ class Settings(BaseSettings):
     # library (the default), kept for environments that prefer the CLI.
     ytdlp_binary: str | None = None
 
+    # --- YouTube authentication (cookies) ------------------------------------
+    # Unauthenticated requests get rate-limited and eventually blocked
+    # ("Sign in to confirm you're not a bot"). Provide ONE of the two below
+    # (never both — yt-dlp forbids combining them). See README for export steps.
+    #
+    # Path to a Netscape-format cookies.txt (equivalent to `--cookies FILE`).
+    # The only option that works inside a container (no browser there).
+    ytdlp_cookiefile: str | None = None
+    # Read cookies straight from a local browser, e.g. "chrome" or
+    # "firefox:profile" (equivalent to `--cookies-from-browser`). Host-only.
+    ytdlp_cookies_from_browser: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

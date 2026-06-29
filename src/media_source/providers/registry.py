@@ -1,3 +1,4 @@
+from media_source.config import Settings, get_settings
 from media_source.providers.base import Provider
 from media_source.providers.youtube import YouTubeProvider
 
@@ -15,5 +16,13 @@ class ProviderRegistry:
         return list(self._providers)
 
 
-def build_default_registry() -> ProviderRegistry:
-    return ProviderRegistry([YouTubeProvider()])
+def build_default_registry(settings: Settings | None = None) -> ProviderRegistry:
+    settings = settings or get_settings()
+    return ProviderRegistry(
+        [
+            YouTubeProvider(
+                cookiefile=settings.ytdlp_cookiefile,
+                cookies_from_browser=settings.ytdlp_cookies_from_browser,
+            )
+        ]
+    )

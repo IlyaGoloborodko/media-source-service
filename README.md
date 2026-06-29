@@ -55,6 +55,47 @@ Env vars (prefix `MSS_`, or a `.env` file — see `.env.example`):
 | `MSS_PORT` | `8080` | bind port |
 | `MSS_DEFAULT_SEARCH_LIMIT` | `10` | results when client omits `limit` |
 | `MSS_MAX_SEARCH_LIMIT` | `25` | hard cap on `limit` |
+| `MSS_YTDLP_COOKIEFILE` | _unset_ | path to a cookies.txt (see below) |
+| `MSS_YTDLP_COOKIES_FROM_BROWSER` | _unset_ | browser to read cookies from, e.g. `chrome` (host only) |
+
+## YouTube authentication (cookies)
+
+Unauthenticated requests get rate-limited and then blocked by YouTube with
+*"Sign in to confirm you're not a bot"*. The first request from an IP usually
+succeeds, but rapid or repeated `/stream` calls hit the wall. Giving yt-dlp a
+real session via cookies raises those limits and is the reliable fix.
+
+Set **exactly one** of the two env vars (yt-dlp forbids combining them):
+
+- `MSS_YTDLP_COOKIES_FROM_BROWSER` — read cookies straight from a local browser.
+  Convenient for **local/host** runs (`chrome`, `firefox`, `firefox:profile`).
+  Does **not** work in Docker — there's no browser in the container.
+- `MSS_YTDLP_COOKIEFILE` — path to a Netscape-format `cookies.txt`. The option
+  to use **in Docker**.
+
+### Exporting a cookies.txt that stays valid
+
+YouTube rotates cookies on any open youtube.com tab, which silently invalidates
+exported cookies. Follow yt-dlp's official procedure to avoid that
+([wiki](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)):
+
+1. Open a **private/incognito** window and log into YouTube (use a **throwaway
+   account** — the cookies grant access to it, and accounts can get banned).
+2. In the **same tab**, open `https://www.youtube.com/robots.txt` (and nothing
+   else — don't browse YouTube further).
+3. Export cookies for `youtube.com` with a Netscape-format extension such as
+   *"Get cookies.txt LOCALLY"*. The first line must be `# Netscape HTTP Cookie File`.
+4. **Close** the incognito window so the session is never reopened.
+
+### Docker notes
+
+- Save `cookies.txt` next to `docker-compose.yml`, then uncomment the
+  `environment` (`MSS_YTDLP_COOKIEFILE=/app/cookies.txt`) and `volumes`
+  (`./cookies.txt:/app/cookies.txt:ro`) lines and `docker compose up -d --build`.
+- The file must use **Unix (LF)** line endings inside the Linux container;
+  a Windows (CRLF) file causes HTTP 400 errors. Convert if needed.
+- Cookies expire — re-export when `/stream` starts failing again.
+- `cookies.txt` is git-ignored; still, don't share it (it contains your session).
 
 ## Layout
 

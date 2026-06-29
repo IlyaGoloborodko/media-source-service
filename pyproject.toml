@@ -1,0 +1,32 @@
+[project]
+name = "media-source-service"
+version = "0.1.0"
+description = "Provider-agnostic media search and stream-URL resolution service."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic-settings>=2.4",
+    "yt-dlp>=2024.8.6",
+]
+
+[project.scripts]
+media-source-service = "media_source.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_source"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Hard cap so a client cannot ask the upstream for an unbounded list.
     max_search_limit: int = 25
 
+    # Playlists are larger than searches, so they get their own limits.
+    default_playlist_limit: int = 50
+    max_playlist_limit: int = 100
+
     # Optional path to a yt-dlp binary. Unused when yt-dlp is imported as a
     # library (the default), kept for environments that prefer the CLI.
     ytdlp_binary: str | None = None

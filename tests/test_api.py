@@ -25,6 +25,14 @@ class FakeProvider(Provider):
             provider=self.name, id=track_id, stream_url=f"https://cdn/{track_id}"
         )
 
+    async def resolve_playlist(self, playlist: str, limit: int) -> list[Track]:
+        if playlist == "boom":
+            raise ProviderError("playlist exploded")
+        return [
+            Track(provider=self.name, id=f"p{i}", title=f"{playlist} {i}")
+            for i in range(limit)
+        ]
+
 
 @pytest.fixture
 def client():
@@ -76,3 +84,39 @@ def test_stream(client):
     body = r.json()
     assert body["stream_url"] == "https://cdn/abc"
     assert body["expires_at"] is None
+
+
+def test_playlist_returns_tracks(client):
+    r = client.get("/playlist", params={"url": "PL123", "limit": 4})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["provider"] == "youtube"
+    assert body["playlist"] == "PL123"
+    assert len(body["results"]) == 4
+    # Track shape must match /search results exactly.
+    assert set(body["results"][0]) == {
+        "provider",
+        "id",
+        "title",
+        "uploader",
+        "url",
+        "duration",
+        "thumbnail",
+    }
+
+
+def test_playlist_caps_at_max_limit(client):
+    r = client.get("/playlist", params={"url": "PL123", "limit": 9999})
+    assert r.status_code == 200
+    assert len(r.json()["results"]) == 100  # max_playlist_limit default
+
+
+def test_playlist_unknown_provider_404(client):
+    r = client.get("/playlist", params={"url": "PL123", "provider": "spotify"})
+    assert r.status_code == 404
+
+
+def test_playlist_provider_error_becomes_502(client):
+    r = client.get("/playlist", params={"url": "boom"})
+    assert r.status_code == 502
+    assert "exploded" in r.json()["detail"]

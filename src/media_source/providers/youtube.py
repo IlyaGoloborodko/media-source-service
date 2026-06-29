@@ -21,6 +21,16 @@ _SEARCH_OPTS: dict[str, Any] = {
     "default_search": "ytsearch",
 }
 
+# Like search, but resolves playlists instead of forbidding them. Still flat:
+# we only need each entry's id/title, not per-video metadata.
+_PLAYLIST_OPTS: dict[str, Any] = {
+    "quiet": True,
+    "no_warnings": True,
+    "skip_download": True,
+    "extract_flat": True,
+    "noplaylist": False,
+}
+
 _STREAM_OPTS: dict[str, Any] = {
     "quiet": True,
     "no_warnings": True,
@@ -46,6 +56,7 @@ class YouTubeProvider(Provider):
         cookie_opts = _build_cookie_opts(cookiefile, cookies_from_browser)
         self._search_opts = {**_SEARCH_OPTS, **cookie_opts, **(search_opts or {})}
         self._stream_opts = {**_STREAM_OPTS, **cookie_opts, **(stream_opts or {})}
+        self._playlist_opts = {**_PLAYLIST_OPTS, **cookie_opts}
 
     async def search(self, query: str, limit: int) -> list[Track]:
         query = query.strip()
@@ -80,6 +91,29 @@ class YouTubeProvider(Provider):
             stream_url=stream_url,
             expires_at=_extract_expiry(stream_url),
         )
+
+    async def resolve_playlist(self, playlist: str, limit: int) -> list[Track]:
+        playlist = playlist.strip()
+        target = (
+            playlist
+            if playlist.startswith("http")
+            else f"https://www.youtube.com/playlist?list={playlist}"
+        )
+
+        info = await asyncio.to_thread(self._extract, target, self._playlist_opts)
+        entries = (info or {}).get("entries") or []
+
+        tracks: list[Track] = []
+        for entry in entries:
+            track = self._entry_to_track(entry)
+            if track is not None:
+                tracks.append(track)
+            if len(tracks) >= limit:
+                break
+
+        if not tracks:
+            raise ProviderError(f"playlist {playlist!r} yielded no tracks")
+        return tracks
 
     @staticmethod
     def _extract(target: str, opts: dict[str, Any]) -> dict[str, Any] | None:

@@ -21,6 +21,12 @@ class SearchResponse(BaseModel):
     results: list[Track]
 
 
+class PlaylistResponse(BaseModel):
+    provider: str
+    playlist: str = Field(description="Requested playlist reference (URL or id).")
+    results: list[Track]
+
+
 class StreamResponse(BaseModel):
     """Resolved direct stream URL. Bytes are served by the provider CDN, not
     proxied through this service."""

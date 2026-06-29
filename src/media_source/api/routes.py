@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from media_source.config import Settings, get_settings
-from media_source.models.schemas import SearchResponse, StreamResponse
+from media_source.models.schemas import (
+    PlaylistResponse,
+    SearchResponse,
+    StreamResponse,
+)
 from media_source.providers.base import Provider, ProviderError
 from media_source.providers.registry import ProviderRegistry
 
@@ -44,6 +48,27 @@ async def search(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return SearchResponse(provider=provider, query=q, results=results)
+
+
+@router.get("/playlist", response_model=PlaylistResponse)
+async def playlist(
+    url: str = Query(..., min_length=1, description="Playlist URL or id."),
+    provider: str = Query("youtube", description="Provider id."),
+    limit: int | None = Query(None, ge=1, description="Max tracks."),
+    registry: ProviderRegistry = Depends(get_registry),
+    settings: Settings = Depends(get_settings),
+) -> PlaylistResponse:
+    prov = resolve_provider(provider, registry)
+    effective_limit = min(
+        limit or settings.default_playlist_limit, settings.max_playlist_limit
+    )
+
+    try:
+        results = await prov.resolve_playlist(url, effective_limit)
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return PlaylistResponse(provider=provider, playlist=url, results=results)
 
 
 @router.get("/stream", response_model=StreamResponse)

@@ -21,3 +21,7 @@ class Provider(ABC):
     @abstractmethod
     async def resolve_stream(self, track_id: str) -> StreamResponse:
         """Resolve a playable direct stream URL for ``track_id``."""
+
+    @abstractmethod
+    async def resolve_playlist(self, playlist: str, limit: int) -> list[Track]:
+        """Expand a playlist reference (URL or id) into its tracks."""

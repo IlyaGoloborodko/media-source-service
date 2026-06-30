@@ -12,22 +12,44 @@ implementing one `Provider` interface — the HTTP contract does not change.
 
 ## API
 
-| Method | Path      | Query                                   | Returns |
-|--------|-----------|-----------------------------------------|---------|
-| GET    | `/health` | —                                       | `{status, providers}` |
-| GET    | `/search` | `q` (required), `provider=youtube`, `limit` | `{provider, query, results: [Track]}` |
-| GET    | `/stream` | `id` (required), `provider=youtube`     | `{provider, id, stream_url, expires_at}` |
+| Method | Path       | Query                                   | Returns |
+|--------|------------|-----------------------------------------|---------|
+| GET    | `/health`  | —                                       | `{status, providers}` |
+| GET    | `/search`  | `q` (required), `provider=youtube`, `limit` | `{provider, query, results: [Track]}` |
+| GET    | `/stream`  | `id` (required), `provider=youtube`     | `{provider, id, stream_url, expires_at}` |
+| GET    | `/playlist`| `url` (required, URL or id), `provider=youtube`, `limit` | `{provider, playlist, results: [Track]}` |
+| GET    | `/similar` | `artist` (required), `track` (required), `limit` | `{results: [Track]}` |
+| GET    | `/charts`  | `tag` and/or `country`, `limit`         | `{results: [Track]}` |
 
 `Track`: `{provider, id, title, uploader?, url?, duration?, thumbnail?}`
 
-Errors: `422` invalid params, `404` unknown provider, `502` upstream/provider failure.
+Errors: `422` invalid params, `404` unknown provider, `502` upstream/provider
+failure, `503` Last.fm API key not configured (discovery endpoints).
 Interactive docs at `/docs`.
+
+### Discovery (Last.fm → playable YouTube tracks)
+
+`/similar` and `/charts` use **Last.fm** to *pick* music (recommendations, genre/
+mood charts, global or per-country top tracks), then resolve each suggestion to a
+real, streamable **YouTube** track via the existing search. So their `results` are
+ordinary `Track`s (`provider="youtube"`) that the bot can `/stream` unchanged.
+
+Last.fm is metadata-only; unresolved suggestions are dropped. Requires a Last.fm
+API key (`MSS_LASTFM_API_KEY`, see Configuration) — without it these two
+endpoints return `503`.
+
+- `/charts` precedence when several are given: `tag` → `country` → global.
+- `country` is an ISO country *name* (e.g. `Germany`), per Last.fm `geo.getTopTracks`.
 
 ### Example
 
 ```
 GET /search?q=daft+punk&limit=2
 GET /stream?id=dQw4w9WgXcQ
+GET /playlist?url=PLxxxx&limit=20
+GET /similar?artist=Daft+Punk&track=Da+Funk&limit=10
+GET /charts?tag=synthwave&limit=10
+GET /charts?country=Germany&limit=10
 ```
 
 ## Run
@@ -57,6 +79,7 @@ Env vars (prefix `MSS_`, or a `.env` file — see `.env.example`):
 | `MSS_MAX_SEARCH_LIMIT` | `25` | hard cap on `limit` |
 | `MSS_YTDLP_COOKIEFILE` | _unset_ | path to a cookies.txt (see below) |
 | `MSS_YTDLP_COOKIES_FROM_BROWSER` | _unset_ | browser to read cookies from, e.g. `chrome` (host only) |
+| `MSS_LASTFM_API_KEY` | _unset_ | Last.fm API key for `/similar` and `/charts` ([create one](https://www.last.fm/api/account/create)) |
 
 ## YouTube authentication (cookies)
 
@@ -101,14 +124,17 @@ exported cookies. Follow yt-dlp's official procedure to avoid that
 
 ```
 src/media_source/
-  main.py              # FastAPI app + lifespan (builds provider registry)
+  main.py              # FastAPI app + lifespan (registry + discovery wiring)
   config.py            # pydantic-settings
-  api/routes.py        # /health /search /stream
-  models/schemas.py    # Track, SearchResponse, StreamResponse
+  api/routes.py        # /health /search /stream /playlist /similar /charts
+  models/schemas.py    # Track, SearchResponse, StreamResponse, ...
   providers/
     base.py            # Provider ABC + ProviderError
     youtube.py         # yt-dlp-backed implementation
+    lastfm.py          # Last.fm metadata client (httpx)
     registry.py        # name -> provider lookup
+  services/
+    discovery.py       # Last.fm candidates -> playable YouTube Tracks
 ```
 
 ## Adding a provider

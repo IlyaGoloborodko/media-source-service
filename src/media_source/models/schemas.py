@@ -21,6 +21,13 @@ class SearchResponse(BaseModel):
     results: list[Track]
 
 
+class DiscoveryResponse(BaseModel):
+    """Discovery results, already resolved to playable Tracks (same shape as
+    ``/search`` results) so the bot can ``/stream`` them unchanged."""
+
+    results: list[Track]
+
+
 class PlaylistResponse(BaseModel):
     provider: str
     playlist: str = Field(description="Requested playlist reference (URL or id).")

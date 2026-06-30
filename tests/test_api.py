@@ -4,6 +4,7 @@ from starlette.testclient import TestClient
 from media_source.main import create_app
 from media_source.models.schemas import StreamResponse, Track
 from media_source.providers.base import Provider, ProviderError
+from media_source.providers.lastfm import LastfmNotConfigured
 from media_source.providers.registry import ProviderRegistry
 
 
@@ -34,13 +35,35 @@ class FakeProvider(Provider):
         ]
 
 
+class FakeDiscovery:
+    """Stand-in for DiscoveryService used by the /similar and /charts tests."""
+
+    async def similar(self, artist, track, limit):
+        if artist == "boom":
+            raise ProviderError("discovery exploded")
+        if artist == "nokey":
+            raise LastfmNotConfigured("Last.fm API key not configured")
+        return [
+            Track(provider="youtube", id=f"yt{i}", title=f"{artist} {i}")
+            for i in range(limit)
+        ]
+
+    async def charts(self, *, tag=None, country=None, limit=10):
+        label = tag or country or "global"
+        return [
+            Track(provider="youtube", id=f"yt{i}", title=f"{label} {i}")
+            for i in range(limit)
+        ]
+
+
 @pytest.fixture
 def client():
     app = create_app()
     app.dependency_overrides = {}
     with TestClient(app) as c:
-        # Replace the real registry installed by lifespan with the fake one.
+        # Replace the real registry/discovery installed by lifespan with fakes.
         c.app.state.registry = ProviderRegistry([FakeProvider()])
+        c.app.state.discovery = FakeDiscovery()
         yield c
 
 
@@ -120,3 +143,52 @@ def test_playlist_provider_error_becomes_502(client):
     r = client.get("/playlist", params={"url": "boom"})
     assert r.status_code == 502
     assert "exploded" in r.json()["detail"]
+
+
+def test_similar_returns_track_shaped_results(client):
+    r = client.get("/similar", params={"artist": "Daft Punk", "track": "Da Funk", "limit": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["results"]) == 3
+    # Discovery results must be identical in shape to /search results.
+    assert set(body["results"][0]) == {
+        "provider",
+        "id",
+        "title",
+        "uploader",
+        "url",
+        "duration",
+        "thumbnail",
+    }
+    assert body["results"][0]["provider"] == "youtube"
+
+
+def test_similar_requires_artist_and_track(client):
+    assert client.get("/similar", params={"artist": "x"}).status_code == 422
+    assert client.get("/similar", params={"artist": "", "track": "y"}).status_code == 422
+
+
+def test_similar_caps_at_max_limit(client):
+    r = client.get("/similar", params={"artist": "a", "track": "b", "limit": 9999})
+    assert len(r.json()["results"]) == 25  # max_search_limit default
+
+
+def test_similar_missing_api_key_503(client):
+    r = client.get("/similar", params={"artist": "nokey", "track": "b"})
+    assert r.status_code == 503
+    assert "API key" in r.json()["detail"]
+
+
+def test_similar_upstream_error_502(client):
+    r = client.get("/similar", params={"artist": "boom", "track": "b"})
+    assert r.status_code == 502
+    assert "exploded" in r.json()["detail"]
+
+
+def test_charts_global_and_tag(client):
+    r = client.get("/charts", params={"limit": 4})
+    assert r.status_code == 200
+    assert len(r.json()["results"]) == 4
+    r2 = client.get("/charts", params={"tag": "rock", "limit": 2})
+    assert r2.status_code == 200
+    assert r2.json()["results"][0]["title"].startswith("rock")

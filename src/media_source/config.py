@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # "firefox:profile" (equivalent to `--cookies-from-browser`). Host-only.
     ytdlp_cookies_from_browser: str | None = None
 
+    # --- Last.fm (music discovery) -------------------------------------------
+    # API key for Last.fm metadata calls (similar tracks, charts, top-by-tag).
+    # Read from MSS_LASTFM_API_KEY. Without it, the discovery endpoints return
+    # 503. Never logged. https://www.last.fm/api/account/create
+    lastfm_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

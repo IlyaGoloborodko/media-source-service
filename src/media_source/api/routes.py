@@ -2,18 +2,25 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from media_source.config import Settings, get_settings
 from media_source.models.schemas import (
+    DiscoveryResponse,
     PlaylistResponse,
     SearchResponse,
     StreamResponse,
 )
 from media_source.providers.base import Provider, ProviderError
+from media_source.providers.lastfm import LastfmNotConfigured
 from media_source.providers.registry import ProviderRegistry
+from media_source.services.discovery import DiscoveryService
 
 router = APIRouter()
 
 
 def get_registry(request: Request) -> ProviderRegistry:
     return request.app.state.registry
+
+
+def get_discovery(request: Request) -> DiscoveryService:
+    return request.app.state.discovery
 
 
 def resolve_provider(name: str, registry: ProviderRegistry) -> Provider:
@@ -80,5 +87,46 @@ async def stream(
     prov = resolve_provider(provider, registry)
     try:
         return await prov.resolve_stream(id)
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/similar", response_model=DiscoveryResponse)
+async def similar(
+    artist: str = Query(..., min_length=1, description="Seed artist."),
+    track: str = Query(..., min_length=1, description="Seed track title."),
+    limit: int | None = Query(None, ge=1, description="Max results."),
+    discovery: DiscoveryService = Depends(get_discovery),
+    settings: Settings = Depends(get_settings),
+) -> DiscoveryResponse:
+    effective_limit = min(limit or settings.default_search_limit, settings.max_search_limit)
+    results = await _discover(discovery.similar(artist, track, effective_limit))
+    return DiscoveryResponse(results=results)
+
+
+@router.get("/charts", response_model=DiscoveryResponse)
+async def charts(
+    tag: str | None = Query(None, min_length=1, description="Genre/mood tag."),
+    country: str | None = Query(
+        None, min_length=1, description="ISO country name for geo charts."
+    ),
+    limit: int | None = Query(None, ge=1, description="Max results."),
+    discovery: DiscoveryService = Depends(get_discovery),
+    settings: Settings = Depends(get_settings),
+) -> DiscoveryResponse:
+    effective_limit = min(limit or settings.default_search_limit, settings.max_search_limit)
+    results = await _discover(
+        discovery.charts(tag=tag, country=country, limit=effective_limit)
+    )
+    return DiscoveryResponse(results=results)
+
+
+async def _discover(coro):
+    """Await a discovery coroutine, mapping its failures to the HTTP error
+    model: missing API key -> 503, upstream/provider failure -> 502."""
+    try:
+        return await coro
+    except LastfmNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

@@ -42,6 +42,22 @@ endpoints return `503`.
 - `/charts` precedence when several are given: `tag` → `country` → global.
 - `country` is an ISO country *name* (e.g. `Germany`), per Last.fm `geo.getTopTracks`.
 
+**Dirty names are accepted.** `/similar` normalises `artist`/`track` the same way
+`/tags` does (see below), so raw YouTube metadata such as
+`artist="Death From Above 1979 - Topic"` resolves instead of silently matching
+nothing.
+
+**Unknown vs broken are distinguishable** — deliberately:
+
+| Situation | Response |
+|-----------|----------|
+| Last.fm has no such artist/track/tag | `200` with `{"results": []}` |
+| Last.fm timeout, unreachable, 5xx, rate limit | `502` |
+| Last.fm API key not configured | `503` |
+
+An unknown name is a valid empty answer, not a failure; flattening a real outage
+into an empty list too would make outages invisible, so those stay errors.
+
 ### `/tags` — genre/style tags
 
 Returns Last.fm tags for an artist (`artist.getTopTags`) or a specific track

@@ -2,7 +2,7 @@ import pytest
 
 from media_source.models.schemas import StreamResponse, Track
 from media_source.providers.base import Provider, ProviderError
-from media_source.providers.lastfm import TrackCandidate
+from media_source.providers.lastfm import LastfmNotFound, TrackCandidate
 from media_source.services.discovery import DiscoveryService
 
 
@@ -127,3 +127,69 @@ async def test_lastfm_error_propagates_as_provider_error():
     svc = DiscoveryService(FakeLastfm(error=ProviderError("upstream")), FakeYouTube())
     with pytest.raises(ProviderError):
         await svc.similar("a", "b", 10)
+
+
+# --- unknown-vs-broken, and normalisation of raw YouTube names ---------------
+
+
+class RecordingLastfm(FakeLastfm):
+    """Captures the artist/track actually sent upstream."""
+
+    def __init__(self, candidates=None, error=None):
+        super().__init__(candidates, error)
+        self.seen: tuple | None = None
+
+    async def similar_tracks(self, artist, track, limit):
+        self.seen = (artist, track)
+        return await self._result()
+
+
+async def test_similar_normalizes_raw_youtube_names():
+    lastfm = RecordingLastfm(_candidates(("X", "Y")))
+    svc = DiscoveryService(lastfm, FakeYouTube())
+
+    await svc.similar("Death From Above 1979 - Topic", "Romantic Rights [HD]", 10)
+    assert lastfm.seen == ("Death From Above 1979", "Romantic Rights")
+
+
+async def test_similar_extracts_artist_from_combined_title():
+    lastfm = RecordingLastfm(_candidates(("X", "Y")))
+    svc = DiscoveryService(lastfm, FakeYouTube())
+
+    await svc.similar("Slipknot - Psychosocial [OFFICIAL VIDEO]", "Psychosocial", 10)
+    assert lastfm.seen == ("Slipknot", "Psychosocial")
+
+
+async def test_similar_unresolvable_names_skip_upstream():
+    lastfm = RecordingLastfm(_candidates(("X", "Y")))
+    svc = DiscoveryService(lastfm, FakeYouTube())
+
+    assert await svc.similar("- Topic", "[HD]", 10) == []
+    assert lastfm.seen is None
+
+
+async def test_similar_not_found_is_empty_not_error():
+    svc = DiscoveryService(
+        FakeLastfm(error=LastfmNotFound("Last.fm error 6: Track not found")),
+        FakeYouTube(),
+    )
+    assert await svc.similar("Nonexistent12345", "Nothing", 10) == []
+
+
+async def test_charts_not_found_is_empty_not_error():
+    svc = DiscoveryService(FakeLastfm(error=LastfmNotFound("error 6")), FakeYouTube())
+    assert await svc.charts(tag="nonexistent-tag", limit=10) == []
+
+
+async def test_real_failures_stay_errors_so_outages_remain_visible():
+    # Timeout / 5xx / rate limit must NOT be flattened into an empty list.
+    for boom in (
+        ProviderError("Last.fm request failed (network error)"),
+        ProviderError("Last.fm returned HTTP 503"),
+        ProviderError("Last.fm error 29: Rate limit exceeded"),
+    ):
+        svc = DiscoveryService(FakeLastfm(error=boom), FakeYouTube())
+        with pytest.raises(ProviderError):
+            await svc.similar("Slipknot", "Psychosocial", 10)
+        with pytest.raises(ProviderError):
+            await svc.charts(tag="metal", limit=10)

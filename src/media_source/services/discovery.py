@@ -11,7 +11,8 @@ import asyncio
 
 from media_source.models.schemas import Track
 from media_source.providers.base import Provider, ProviderError
-from media_source.providers.lastfm import LastfmClient, TrackCandidate
+from media_source.providers.lastfm import LastfmClient, LastfmNotFound, TrackCandidate
+from media_source.providers.naming import normalize_artist, normalize_track
 
 # Bound how many YouTube resolutions run at once so a large request can't fan
 # out into dozens of simultaneous yt-dlp calls.
@@ -30,7 +31,24 @@ class DiscoveryService:
         self._max_concurrency = max_concurrency
 
     async def similar(self, artist: str, track: str, limit: int) -> list[Track]:
-        candidates = await self._lastfm.similar_tracks(artist, track, limit)
+        # Callers pass raw YouTube metadata ("X - Topic", "Artist - Track [HD]"),
+        # which Last.fm matches against nothing — silently returning an empty
+        # list rather than an error. Normalising first is what makes these
+        # lookups resolve at all.
+        clean_artist = normalize_artist(artist)
+        clean_track = normalize_track(track)
+        if not clean_artist or not clean_track:
+            return []
+
+        try:
+            candidates = await self._lastfm.similar_tracks(
+                clean_artist, clean_track, limit
+            )
+        except LastfmNotFound:
+            # "Last.fm doesn't know it" is a valid empty answer, not a failure.
+            # Real failures (timeouts, 5xx, rate limits) stay ProviderError -> 502,
+            # so an outage remains distinguishable from an unknown track.
+            return []
         return await self._resolve_all(candidates, limit)
 
     async def charts(
@@ -42,12 +60,16 @@ class DiscoveryService:
     ) -> list[Track]:
         """Top tracks by tag (genre/mood), by country, or global — in that
         precedence when several are supplied."""
-        if tag:
-            candidates = await self._lastfm.top_tracks_by_tag(tag, limit)
-        elif country:
-            candidates = await self._lastfm.geo_top_tracks(country, limit)
-        else:
-            candidates = await self._lastfm.chart_top_tracks(limit)
+        try:
+            if tag:
+                candidates = await self._lastfm.top_tracks_by_tag(tag, limit)
+            elif country:
+                candidates = await self._lastfm.geo_top_tracks(country, limit)
+            else:
+                candidates = await self._lastfm.chart_top_tracks(limit)
+        except LastfmNotFound:
+            # Unknown tag/country -> empty chart, not an error. Outages still 502.
+            return []
         return await self._resolve_all(candidates, limit)
 
     async def _resolve_all(

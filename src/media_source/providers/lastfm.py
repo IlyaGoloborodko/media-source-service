@@ -11,8 +11,12 @@ from typing import Any
 import httpx
 
 from media_source.providers.base import ProviderError
+from media_source.providers.naming import normalize_artist, normalize_track
 
 _BASE_URL = "https://ws.audioscrobbler.com/2.0/"
+
+# Last.fm reports "no such artist/track" as an error body, not an empty result.
+_NOT_FOUND_ERRORS = {6}
 
 
 @dataclass(frozen=True)
@@ -23,8 +27,24 @@ class TrackCandidate:
     title: str
 
 
+@dataclass(frozen=True)
+class TagCount:
+    """A genre/style tag with Last.fm's popularity count (0-100)."""
+
+    name: str
+    weight: int
+
+
 class LastfmNotConfigured(Exception):
     """Raised when a Last.fm call is attempted without an API key configured."""
+
+
+class LastfmNotFound(ProviderError):
+    """Last.fm has no entry for the requested artist/track.
+
+    A subclass of ProviderError so existing callers keep their behaviour;
+    callers that treat "unknown" as a valid empty answer catch it explicitly.
+    """
 
 
 class LastfmClient:
@@ -65,6 +85,37 @@ class LastfmClient:
         data = await self._call("geo.getTopTracks", country=country, limit=limit)
         return _parse_candidates(data, "tracks")
 
+    async def artist_top_tags(self, artist: str, limit: int) -> list[TagCount]:
+        data = await self._call("artist.getTopTags", artist=artist)
+        return _parse_tags(data, limit)
+
+    async def track_top_tags(
+        self, artist: str, track: str, limit: int
+    ) -> list[TagCount]:
+        data = await self._call("track.getTopTags", artist=artist, track=track)
+        return _parse_tags(data, limit)
+
+    async def top_tags(
+        self, artist: str, track: str | None = None, limit: int = 10
+    ) -> list[TagCount]:
+        """Genre/style tags for a track (when ``track`` is given) or an artist.
+
+        Forgiving by design: names arrive straight from YouTube so they are
+        normalised first, and "Last.fm doesn't know this one" is an empty list,
+        not an error — an unknown genre is a valid answer, not a failure.
+        """
+        clean_artist = normalize_artist(artist)
+        if not clean_artist:
+            return []
+        clean_track = normalize_track(track) if track else ""
+
+        try:
+            if clean_track:
+                return await self.track_top_tags(clean_artist, clean_track, limit)
+            return await self.artist_top_tags(clean_artist, limit)
+        except LastfmNotFound:
+            return []
+
     async def _call(self, method: str, **params: Any) -> dict:
         if not self._api_key:
             raise LastfmNotConfigured(
@@ -91,10 +142,38 @@ class LastfmClient:
 
         # Last.fm signals errors with HTTP 200 and an {"error", "message"} body.
         if isinstance(data, dict) and "error" in data:
-            raise ProviderError(
-                f"Last.fm error {data.get('error')}: {data.get('message')}"
-            )
+            code = data.get("error")
+            detail = f"Last.fm error {code}: {data.get('message')}"
+            if code in _NOT_FOUND_ERRORS:
+                raise LastfmNotFound(detail)
+            raise ProviderError(detail)
         return data
+
+
+def _parse_tags(data: dict, limit: int) -> list[TagCount]:
+    """Read ``{"toptags": {"tag": [{"name", "count"}]}}``, heaviest tag first.
+
+    Tags are returned as-is: no genre whitelist, no filtering of "seen live" or
+    similar — weighting and filtering belong to the consumer.
+    """
+    container = data.get("toptags") or {}
+    items = container.get("tag") or []
+    if isinstance(items, dict):  # Last.fm collapses a single result to a dict.
+        items = [items]
+
+    tags: list[TagCount] = []
+    for item in items:
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            weight = int(item.get("count") or 0)
+        except (TypeError, ValueError):
+            weight = 0
+        tags.append(TagCount(name=name, weight=weight))
+
+    tags.sort(key=lambda tag: tag.weight, reverse=True)
+    return tags[:limit]
 
 
 def _parse_candidates(data: dict, root_key: str) -> list[TrackCandidate]:

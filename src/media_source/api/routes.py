@@ -6,9 +6,11 @@ from media_source.models.schemas import (
     PlaylistResponse,
     SearchResponse,
     StreamResponse,
+    Tag,
+    TagsResponse,
 )
 from media_source.providers.base import Provider, ProviderError
-from media_source.providers.lastfm import LastfmNotConfigured
+from media_source.providers.lastfm import LastfmClient, LastfmNotConfigured
 from media_source.providers.registry import ProviderRegistry
 from media_source.services.discovery import DiscoveryService
 
@@ -21,6 +23,10 @@ def get_registry(request: Request) -> ProviderRegistry:
 
 def get_discovery(request: Request) -> DiscoveryService:
     return request.app.state.discovery
+
+
+def get_lastfm(request: Request) -> LastfmClient:
+    return request.app.state.lastfm
 
 
 def resolve_provider(name: str, registry: ProviderRegistry) -> Provider:
@@ -119,6 +125,29 @@ async def charts(
         discovery.charts(tag=tag, country=country, limit=effective_limit)
     )
     return DiscoveryResponse(results=results)
+
+
+@router.get("/tags", response_model=TagsResponse)
+async def tags(
+    artist: str = Query(
+        ...,
+        min_length=1,
+        description="Artist name. May be a raw YouTube uploader/title "
+        "(e.g. 'X - Topic', 'Artist - Track [OFFICIAL VIDEO]') — it is normalised here.",
+    ),
+    track: str | None = Query(
+        None,
+        min_length=1,
+        description="Track title. When given, returns the track's tags "
+        "instead of the artist's.",
+    ),
+    limit: int | None = Query(None, ge=1, description="Max tags."),
+    lastfm: LastfmClient = Depends(get_lastfm),
+    settings: Settings = Depends(get_settings),
+) -> TagsResponse:
+    effective_limit = min(limit or settings.default_tags_limit, settings.max_tags_limit)
+    found = await _discover(lastfm.top_tags(artist, track, effective_limit))
+    return TagsResponse(tags=[Tag(name=t.name, weight=t.weight) for t in found])
 
 
 async def _discover(coro):

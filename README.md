@@ -20,6 +20,7 @@ implementing one `Provider` interface — the HTTP contract does not change.
 | GET    | `/playlist`| `url` (required, URL or id), `provider=youtube`, `limit` | `{provider, playlist, results: [Track]}` |
 | GET    | `/similar` | `artist` (required), `track` (required), `limit` | `{results: [Track]}` |
 | GET    | `/charts`  | `tag` and/or `country`, `limit`         | `{results: [Track]}` |
+| GET    | `/tags`    | `artist` (required), `track`, `limit` (default 10) | `{tags: [{name, weight}]}` |
 
 `Track`: `{provider, id, title, uploader?, url?, duration?, thumbnail?}`
 
@@ -40,6 +41,42 @@ endpoints return `503`.
 
 - `/charts` precedence when several are given: `tag` → `country` → global.
 - `country` is an ISO country *name* (e.g. `Germany`), per Last.fm `geo.getTopTracks`.
+
+### `/tags` — genre/style tags
+
+Returns Last.fm tags for an artist (`artist.getTopTags`) or a specific track
+(`track.getTopTags`, when `track` is given). Unlike the other endpoints the
+payload is **not** tracks:
+
+```json
+{"tags": [{"name": "thrash metal", "weight": 100},
+          {"name": "metal", "weight": 87},
+          {"name": "seen live", "weight": 41}]}
+```
+
+`weight` is Last.fm's tag count (0-100), sorted descending — it exists so a
+consumer can build a *weighted* genre profile instead of treating "seen live"
+and "thrash metal" as equals.
+
+Tags are returned **as-is**: no genre whitelist, no filtering of noise tags.
+Weighting and filtering are the consumer's job.
+
+**Names may be dirty.** Anything YouTube produced is accepted and normalised
+here (see `providers/naming.py`): `- Topic` and `VEVO` suffixes, marketing tails
+like `[OFFICIAL VIDEO]` / `(Official Music Video)` / `[HD]`, and `Artist - Track`
+titles from which the artist is extracted. Meaningful brackets such as `(Remix)`
+and `(feat. …)` are preserved, and hyphenated names (`Dinosaur Pile-Up`) are
+never split.
+
+**Unknown is not an error.** If Last.fm has no entry after normalisation, the
+response is `200` with `{"tags": []}` — an unknown genre simply doesn't enrich
+the profile, and shouldn't force the consumer to handle a failure that isn't one.
+
+```
+GET /tags?artist=Slipknot
+GET /tags?artist=Slipknot&track=Psychosocial&limit=5
+GET /tags?artist=Death+From+Above+1979+-+Topic
+```
 
 ### Example
 
@@ -126,12 +163,13 @@ exported cookies. Follow yt-dlp's official procedure to avoid that
 src/media_source/
   main.py              # FastAPI app + lifespan (registry + discovery wiring)
   config.py            # pydantic-settings
-  api/routes.py        # /health /search /stream /playlist /similar /charts
+  api/routes.py        # /health /search /stream /playlist /similar /charts /tags
   models/schemas.py    # Track, SearchResponse, StreamResponse, ...
   providers/
     base.py            # Provider ABC + ProviderError
     youtube.py         # yt-dlp-backed implementation
-    lastfm.py          # Last.fm metadata client (httpx)
+    lastfm.py          # Last.fm metadata client (httpx): similar/charts/tags
+    naming.py          # normalise YouTube-derived names for Last.fm lookups
     registry.py        # name -> provider lookup
   services/
     discovery.py       # Last.fm candidates -> playable YouTube Tracks

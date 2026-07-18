@@ -21,6 +21,20 @@ class SearchResponse(BaseModel):
     results: list[Track]
 
 
+class Tag(BaseModel):
+    """A genre/style tag with its Last.fm popularity count."""
+
+    name: str
+    weight: int = Field(description="Last.fm tag count, 0-100.")
+
+
+class TagsResponse(BaseModel):
+    """Tags for an artist or track. An empty list means "genre unknown", which
+    is a valid answer rather than an error."""
+
+    tags: list[Tag]
+
+
 class DiscoveryResponse(BaseModel):
     """Discovery results, already resolved to playable Tracks (same shape as
     ``/search`` results) so the bot can ``/stream`` them unchanged."""

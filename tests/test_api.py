@@ -4,7 +4,7 @@ from starlette.testclient import TestClient
 from media_source.main import create_app
 from media_source.models.schemas import StreamResponse, Track
 from media_source.providers.base import Provider, ProviderError
-from media_source.providers.lastfm import LastfmNotConfigured
+from media_source.providers.lastfm import LastfmNotConfigured, TagCount
 from media_source.providers.registry import ProviderRegistry
 
 
@@ -56,6 +56,20 @@ class FakeDiscovery:
         ]
 
 
+class FakeLastfm:
+    """Stand-in for LastfmClient covering the /tags route."""
+
+    async def top_tags(self, artist, track=None, limit=10):
+        if artist == "nokey":
+            raise LastfmNotConfigured("Last.fm API key not configured")
+        if artist == "unknown":
+            return []  # Last.fm doesn't know it -> valid empty answer
+        source = f"{artist}:{track}" if track else artist
+        return [
+            TagCount(name=f"{source} tag{i}", weight=100 - i) for i in range(limit)
+        ]
+
+
 @pytest.fixture
 def client():
     app = create_app()
@@ -64,6 +78,7 @@ def client():
         # Replace the real registry/discovery installed by lifespan with fakes.
         c.app.state.registry = ProviderRegistry([FakeProvider()])
         c.app.state.discovery = FakeDiscovery()
+        c.app.state.lastfm = FakeLastfm()
         yield c
 
 
@@ -183,6 +198,51 @@ def test_similar_upstream_error_502(client):
     r = client.get("/similar", params={"artist": "boom", "track": "b"})
     assert r.status_code == 502
     assert "exploded" in r.json()["detail"]
+
+
+def test_tags_returns_name_weight_pairs(client):
+    r = client.get("/tags", params={"artist": "Slipknot", "limit": 3})
+    assert r.status_code == 200
+    body = r.json()
+    assert list(body) == ["tags"]
+    assert set(body["tags"][0]) == {"name", "weight"}
+    assert len(body["tags"]) == 3
+    # Sorted by descending weight.
+    weights = [t["weight"] for t in body["tags"]]
+    assert weights == sorted(weights, reverse=True)
+
+
+def test_tags_track_differs_from_artist(client):
+    artist_only = client.get("/tags", params={"artist": "Slipknot"}).json()
+    with_track = client.get(
+        "/tags", params={"artist": "Slipknot", "track": "Psychosocial"}
+    ).json()
+    assert artist_only["tags"][0]["name"] != with_track["tags"][0]["name"]
+
+
+def test_tags_defaults_to_ten(client):
+    assert len(client.get("/tags", params={"artist": "Slipknot"}).json()["tags"]) == 10
+
+
+def test_tags_caps_at_max_limit(client):
+    r = client.get("/tags", params={"artist": "Slipknot", "limit": 9999})
+    assert len(r.json()["tags"]) == 50  # max_tags_limit default
+
+
+def test_tags_unknown_artist_is_200_with_empty_list(client):
+    r = client.get("/tags", params={"artist": "unknown"})
+    assert r.status_code == 200
+    assert r.json() == {"tags": []}
+
+
+def test_tags_requires_artist(client):
+    assert client.get("/tags").status_code == 422
+    assert client.get("/tags", params={"artist": ""}).status_code == 422
+
+
+def test_tags_missing_api_key_503(client):
+    r = client.get("/tags", params={"artist": "nokey"})
+    assert r.status_code == 503
 
 
 def test_charts_global_and_tag(client):

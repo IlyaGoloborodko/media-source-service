@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
     # One shared HTTP client for all Last.fm calls, closed on shutdown.
     async with httpx.AsyncClient(timeout=10.0) as http_client:
         lastfm = LastfmClient(settings.lastfm_api_key, client=http_client)
+        app.state.lastfm = lastfm
         app.state.discovery = DiscoveryService(lastfm, registry.get("youtube"))
         yield
 

@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     default_playlist_limit: int = 50
     max_playlist_limit: int = 100
 
+    # Genre/style tags per artist or track.
+    default_tags_limit: int = 10
+    max_tags_limit: int = 50
+
     # Optional path to a yt-dlp binary. Unused when yt-dlp is imported as a
     # library (the default), kept for environments that prefer the CLI.
     ytdlp_binary: str | None = None

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
@@ -10,6 +11,8 @@ from yt_dlp import YoutubeDL
 
 from media_source.models.schemas import StreamResponse, Track
 from media_source.providers.base import Provider, ProviderError
+
+logger = logging.getLogger(__name__)
 
 # Shared, mostly-immutable yt-dlp options. extract_flat keeps search cheap by
 # skipping per-video metadata extraction (we only need id/title for a list).
@@ -157,10 +160,42 @@ def _build_cookie_opts(
             "set only one of ytdlp_cookiefile / ytdlp_cookies_from_browser"
         )
     if cookiefile:
+        if not _usable_cookiefile(cookiefile):
+            # Degrade instead of crash-looping: /search still works, and the
+            # error is loud enough (it reaches Telegram) to be noticed. A
+            # container stuck in a restart loop would be worse in a shared
+            # stack where other services depend on this one.
+            return {}
         return {"cookiefile": _writable_cookie_copy(cookiefile)}
     if cookies_from_browser:
         return {"cookiesfrombrowser": _parse_browser_spec(cookies_from_browser)}
     return {}
+
+
+def _usable_cookiefile(cookiefile: str) -> bool:
+    """Check the cookie file before yt-dlp trips over it.
+
+    Docker's *file* bind mounts have a nasty failure mode: if the host path is
+    missing, Docker creates a **directory** at the mount point. yt-dlp then
+    fails somewhere deep with an unrelated-looking error, so name the cause here.
+    """
+    if os.path.isdir(cookiefile):
+        logger.error(
+            "cookie file %r is a directory — Docker creates one when the host "
+            "file is missing. Copy cookies.txt (LF line endings) next to "
+            "docker-compose.yml and recreate the container. "
+            "Continuing without cookies: /stream will hit YouTube's bot wall.",
+            cookiefile,
+        )
+        return False
+    if not os.path.isfile(cookiefile):
+        logger.error(
+            "cookie file %r not found. Continuing without cookies: /stream will "
+            "hit YouTube's bot wall.",
+            cookiefile,
+        )
+        return False
+    return True
 
 
 def _writable_cookie_copy(cookiefile: str) -> str:

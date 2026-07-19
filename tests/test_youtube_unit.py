@@ -73,6 +73,24 @@ def test_parse_browser_spec_with_profile():
     assert _parse_browser_spec("Firefox:Default") == ("firefox", "Default", None, None)
 
 
+def test_missing_cookiefile_degrades_instead_of_crashing(tmp_path, caplog):
+    with caplog.at_level("ERROR"):
+        opts = _build_cookie_opts(str(tmp_path / "absent.txt"), None)
+    assert opts == {}
+    assert "not found" in caplog.text
+
+
+def test_cookiefile_that_is_a_directory_is_reported_clearly(tmp_path, caplog):
+    # Docker creates a directory at a file mount point when the host file is
+    # missing; yt-dlp's own error for this is unhelpful.
+    mount_point = tmp_path / "cookies.txt"
+    mount_point.mkdir()
+    with caplog.at_level("ERROR"):
+        opts = _build_cookie_opts(str(mount_point), None)
+    assert opts == {}
+    assert "is a directory" in caplog.text
+
+
 def test_cookiefile_threads_writable_copy_into_ydl_opts(tmp_path):
     src = tmp_path / "c.txt"
     src.write_text("# Netscape HTTP Cookie File\n")

@@ -13,8 +13,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Defaults are the container contract: other services in the stack reach
+    # this one at http://media-source-service:9000. Binding 127.0.0.1 inside a
+    # container would make it unreachable while the logs still look healthy, so
+    # the default stays 0.0.0.0 and `.env` (which is gitignored, and may simply
+    # be absent on a server) is not required to get a working deployment.
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 9000
 
     # Default result count for search when the client does not specify one.
     default_search_limit: int = 10

@@ -109,7 +109,7 @@ GET /charts?country=Germany&limit=10
 
 ```bash
 uv sync
-uv run media-source-service        # serves on 0.0.0.0:8080
+uv run media-source-service        # serves on 0.0.0.0:9000
 uv run pytest                      # tests (network-free)
 ```
 
@@ -117,7 +117,7 @@ Docker:
 
 ```bash
 docker build -t media-source-service .
-docker run -p 8080:8080 media-source-service
+docker run -p 9000:9000 media-source-service
 ```
 
 ## Configuration
@@ -127,7 +127,7 @@ Env vars (prefix `MSS_`, or a `.env` file — see `.env.example`):
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `MSS_HOST` | `0.0.0.0` | bind host |
-| `MSS_PORT` | `8080` | bind port |
+| `MSS_PORT` | `9000` | bind port (pinned to 9000 in docker-compose) |
 | `MSS_DEFAULT_SEARCH_LIMIT` | `10` | results when client omits `limit` |
 | `MSS_MAX_SEARCH_LIMIT` | `25` | hard cap on `limit` |
 | `MSS_YTDLP_COOKIEFILE` | _unset_ | path to a cookies.txt (see below) |

@@ -1,4 +1,6 @@
 services:
+  # The service name is the hostname inside the shared stack: other services
+  # reach this one at http://media-source-service:9000.
   media-source-service:
     build: .
     container_name: media-source-service
@@ -6,14 +8,27 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # Pinned so the container always binds the port the stack expects.
+      # `environment` wins over `env_file`, so a stray MSS_PORT in a local .env
+      # can't leave the app listening somewhere compose isn't mapping — and
+      # 0.0.0.0 keeps it reachable from other containers.
+      MSS_HOST: 0.0.0.0
+      MSS_PORT: 9000
     ports:
-      - "${MSS_PORT:-9000}:9000"
-    # YouTube cookies: MSS_YTDLP_COOKIEFILE=cookies.txt comes from .env; the file
-    # itself is mounted read-only here. Must use UNIX (LF) line endings.
+      # Only for poking the API from the server itself; other services use the
+      # compose network and don't need this. Bound to localhost so the service
+      # is not exposed to the internet.
+      - "127.0.0.1:${MSS_HOST_PORT:-9000}:9000"
+    # YouTube cookies. NOTE: this is a *file* bind mount — if cookies.txt is
+    # missing on the host, Docker silently creates a directory in its place.
+    # The service detects that and logs a clear error instead of failing deep
+    # inside yt-dlp. The file is gitignored, so copy it to the server manually
+    # (with LF line endings).
     volumes:
       - ./cookies.txt:/app/cookies.txt:ro
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('MSS_PORT','9000')+'/health')\""]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health')"]
       interval: 30s
       timeout: 5s
       retries: 3

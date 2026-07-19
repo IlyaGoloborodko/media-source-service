@@ -173,12 +173,41 @@ exported cookies. Follow yt-dlp's official procedure to avoid that
 - Cookies expire — re-export when `/stream` starts failing again.
 - `cookies.txt` is git-ignored; still, don't share it (it contains your session).
 
+## Logging
+
+Everything goes to the console; the important parts can be mirrored to a
+Telegram chat. Same setup and the same env var names as `DiscordAiService`, so
+both services are configured identically.
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `LOG_LEVEL` | `INFO` | what shows up in the console |
+| `TELEGRAM_BOT_TOKEN` | _empty_ | from @BotFather; empty turns Telegram off |
+| `TELEGRAM_CHAT_ID` | _empty_ | from @userinfobot, or a group id (negative) |
+| `TELEGRAM_LOG_LEVEL` | `ERROR` | what gets forwarded to Telegram |
+
+These are **not** `MSS_`-prefixed (the prefix applies to `Settings` only); they
+are read straight from the environment after `load_dotenv()`.
+
+The two levels are independent, so the console can stay chatty while Telegram
+only gets what matters. Telegram logging is optional: without both a token and a
+chat id the service runs exactly as before.
+
+Delivery never blocks a request — records go onto a queue and a background
+thread sends them, at most one every 3s (Telegram allows ~20/min per chat). If
+Telegram is down, slow, or the queue fills up, messages are dropped and the
+service keeps running: logging must never be the reason something fails.
+
+`httpx`/`httpcore` are pinned to `WARNING` because they log full request URLs at
+`INFO` — and the Last.fm `api_key` travels in the query string.
+
 ## Layout
 
 ```
 src/media_source/
   main.py              # FastAPI app + lifespan (registry + discovery wiring)
   config.py            # pydantic-settings
+  logging_setup.py     # console + optional Telegram log handler
   api/routes.py        # /health /search /stream /playlist /similar /charts /tags
   models/schemas.py    # Track, SearchResponse, StreamResponse, ...
   providers/

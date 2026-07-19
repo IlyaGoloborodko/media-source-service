@@ -8,11 +8,14 @@ so the result is the same ``Track`` schema as ``/search`` and feeds the unchange
 """
 
 import asyncio
+import logging
 
 from media_source.models.schemas import Track
 from media_source.providers.base import Provider, ProviderError
 from media_source.providers.lastfm import LastfmClient, LastfmNotFound, TrackCandidate
 from media_source.providers.naming import normalize_artist, normalize_track
+
+logger = logging.getLogger(__name__)
 
 # Bound how many YouTube resolutions run at once so a large request can't fan
 # out into dozens of simultaneous yt-dlp calls.
@@ -92,7 +95,12 @@ class DiscoveryService:
         async with semaphore:
             try:
                 hits = await self._resolver.search(query, 1)
-            except ProviderError:
-                # One unresolvable candidate must not fail the whole request.
+            except ProviderError as exc:
+                # One unresolvable candidate must not fail the whole request,
+                # but a burst of these is worth seeing in the logs.
+                logger.warning("could not resolve %r on YouTube: %s", query, exc)
                 return None
-        return hits[0] if hits else None
+        if not hits:
+            logger.debug("no YouTube match for %r", query)
+            return None
+        return hits[0]

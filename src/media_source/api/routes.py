@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from media_source.config import Settings, get_settings
@@ -13,6 +15,8 @@ from media_source.providers.base import Provider, ProviderError
 from media_source.providers.lastfm import LastfmClient, LastfmNotConfigured
 from media_source.providers.registry import ProviderRegistry
 from media_source.services.discovery import DiscoveryService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -32,6 +36,7 @@ def get_lastfm(request: Request) -> LastfmClient:
 def resolve_provider(name: str, registry: ProviderRegistry) -> Provider:
     provider = registry.get(name)
     if provider is None:
+        logger.warning("unknown provider requested: %r", name)
         raise HTTPException(
             status_code=404,
             detail=f"unknown provider {name!r}; available: {registry.names()}",
@@ -58,6 +63,7 @@ async def search(
     try:
         results = await prov.search(q, effective_limit)
     except ProviderError as exc:
+        logger.error("search failed (provider=%s, q=%r): %s", provider, q, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return SearchResponse(provider=provider, query=q, results=results)
@@ -79,6 +85,7 @@ async def playlist(
     try:
         results = await prov.resolve_playlist(url, effective_limit)
     except ProviderError as exc:
+        logger.error("playlist failed (provider=%s, url=%r): %s", provider, url, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return PlaylistResponse(provider=provider, playlist=url, results=results)
@@ -94,6 +101,7 @@ async def stream(
     try:
         return await prov.resolve_stream(id)
     except ProviderError as exc:
+        logger.error("stream failed (provider=%s, id=%r): %s", provider, id, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -156,6 +164,10 @@ async def _discover(coro):
     try:
         return await coro
     except LastfmNotConfigured as exc:
+        logger.error("discovery unavailable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ProviderError as exc:
+        # Reaching here means a real upstream failure: "unknown name" was
+        # already turned into an empty result further down.
+        logger.error("discovery failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
